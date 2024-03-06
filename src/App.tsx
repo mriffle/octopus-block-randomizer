@@ -127,9 +127,6 @@ const App: React.FC = () => {
     return plates;
 }
 
-
-
-
   const handleDragStart = (event: DragEvent<HTMLDivElement>, searchName: string) => {
     setDraggedSearch(searchName);
   };
