@@ -239,7 +239,7 @@ const App: React.FC = () => {
   return (
     <div style={styles.container}>
       <div style={styles.content}>
-        <h1 style={styles.heading}>Batch Randomization</h1>
+        <h1 style={styles.heading}>Block Randomization</h1>
         <input type="file" accept=".csv" onChange={handleFileUpload} style={styles.fileInput} />
         <div style={styles.covariateSelection}>
           <label htmlFor="covariates">Select Covariates:</label>
