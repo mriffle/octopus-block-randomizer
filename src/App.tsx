@@ -1,4 +1,4 @@
-import React, { useState, useEffect, DragEvent } from 'react';
+import React, { useState, useEffect, DragEvent, useCallback  } from 'react';
 import Papa from 'papaparse';
 import Plate from './components/Plate';
 import { SearchData } from './types';
@@ -9,8 +9,6 @@ const App: React.FC = () => {
   const [covariateColors, setCovariateColors] = useState<{ [key: string]: string }>({});
   const [randomizedPlates, setRandomizedPlates] = useState<(SearchData | undefined)[][][]>([]);
   const [draggedSearch, setDraggedSearch] = useState<string | null>(null);
-  const [selectedSampleNameColumn, setSelectedSampleNameColumn] = useState<string>('');
-  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -41,11 +39,7 @@ const App: React.FC = () => {
     setRandomizedPlates(randomizeSearches(searches, selectedCovariates));
   }, [selectedCovariates, searches]);
 
-  useEffect(() => {
-    generateCovariateColors();
-  }, [selectedCovariates, searches]);
-
-  const generateCovariateColors = () => {
+  const generateCovariateColors = useCallback(() => {
     if (selectedCovariates.length > 0 && searches.length > 0) {
       const covariateValues = new Set(
         selectedCovariates.flatMap((covariate) =>
@@ -58,31 +52,18 @@ const App: React.FC = () => {
       let colorIndex = 0;
 
       covariateValues.forEach((value) => {
-        covariateColorsMap[value] = colors[colorIndex];
-        colorIndex = (colorIndex + 1) % colors.length;
+        covariateColorsMap[value] = colors[colorIndex % colors.length];
+        colorIndex += 1;
       });
 
       setCovariateColors(covariateColorsMap);
     }
-  };
+  }, [selectedCovariates, searches]); // Dependencies for useCallback
 
-  function shuffleArray<T>(array: T[]): T[] {
-    let currentIndex = array.length, randomIndex;
-  
-    // While there remain elements to shuffle.
-    while (currentIndex !== 0) {
-  
-      // Pick a remaining element.
-      randomIndex = Math.floor(Math.random() * currentIndex);
-      currentIndex--;
-  
-      // And swap it with the current element.
-      [array[currentIndex], array[randomIndex]] = [
-        array[randomIndex], array[currentIndex]];
-    }
-  
-    return array;
-  }
+  useEffect(() => {
+    generateCovariateColors();
+  }, [generateCovariateColors]); // generateCovariateColors is now a dependency
+
 
   function randomizeSearches(searches: SearchData[], selectedCovariates: string[]): (SearchData | undefined)[][][] {
     const platesNeeded = Math.ceil(searches.length / 96);
@@ -117,7 +98,7 @@ const App: React.FC = () => {
     }
 
     // Place searches with increasing tolerance
-    searchLoop: for (const search of shuffledSearches) {
+    for (const search of shuffledSearches) {
         let placed = false;
         let tolerance = 0;
 
