@@ -5,9 +5,10 @@ interface SearchProps {
   metadata: { [key: string]: string };
   backgroundColor?: string;
   onDragStart: (event: DragEvent<HTMLDivElement>, searchName: string) => void;
+  selectedCovariates: string[];
 }
 
-const Search: React.FC<SearchProps> = ({ name, metadata, backgroundColor, onDragStart }) => {
+const Search: React.FC<SearchProps> = ({ name, metadata, backgroundColor, onDragStart, selectedCovariates }) => {
   const handleDragStart = (event: DragEvent<HTMLDivElement>) => {
     onDragStart(event, name);
   };
@@ -16,13 +17,9 @@ const Search: React.FC<SearchProps> = ({ name, metadata, backgroundColor, onDrag
     <div style={{ ...styles.card, backgroundColor }} draggable onDragStart={handleDragStart}>
       <h3 style={styles.title}>{name}</h3>
       <hr style={styles.divider} />
-      <ul style={styles.metadata}>
-        {Object.entries(metadata).map(([key, value]) => (
-          <li key={key}>
-            {key}: {value}
-          </li>
-        ))}
-      </ul>
+      {selectedCovariates.map((covariate: string) => 
+        metadata[covariate] ? <div key={covariate} style={styles.metadata}>{`${covariate}: ${metadata[covariate]}`}</div> : null
+      )}
     </div>
   );
 };
@@ -33,9 +30,10 @@ const styles = {
     borderRadius: '8px',
     boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
     padding: '16px',
+    width: '150px',
   },
   title: {
-    fontSize: '18px',
+    fontSize: '14px',
     fontWeight: 'bold',
     marginBottom: '8px',
     color: '#333',
@@ -46,7 +44,7 @@ const styles = {
     margin: '12px 0',
   },
   metadata: {
-    fontSize: '14px',
+    fontSize: '12px',
     color: '#666',
     marginBottom: '0',
   },

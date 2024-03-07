@@ -1,14 +1,13 @@
-import React, { useState, useEffect, DragEvent } from 'react';
+import React, { useState, useEffect, DragEvent, useCallback  } from 'react';
 import Papa from 'papaparse';
-import Block from './components/Block';
+import Plate from './components/Plate';
 import { SearchData } from './types';
 
 const App: React.FC = () => {
   const [searches, setSearches] = useState<SearchData[]>([]);
-  const [numBlocks, setNumBlocks] = useState<number>(1);
-  const [primaryCovariate, setPrimaryCovariate] = useState<string>('');
+  const [selectedCovariates, setSelectedCovariates] = useState<string[]>([]);
   const [covariateColors, setCovariateColors] = useState<{ [key: string]: string }>({});
-  const [randomizedBlocks, setRandomizedBlocks] = useState<SearchData[][]>([]);
+  const [randomizedPlates, setRandomizedPlates] = useState<(SearchData | undefined)[][][]>([]);
   const [draggedSearch, setDraggedSearch] = useState<string | null>(null);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -31,83 +30,166 @@ const App: React.FC = () => {
     }
   };
 
-  const handleNumBlocksChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    setNumBlocks(Number(event.target.value));
-  };
-
-  const handlePrimaryCovariateChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    setPrimaryCovariate(event.target.value);
+  const handleCovariateChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedOptions = Array.from(event.target.selectedOptions, (option) => option.value);
+    setSelectedCovariates(selectedOptions);
   };
 
   useEffect(() => {
-    setRandomizedBlocks(randomizeSearches());
-  }, [primaryCovariate, searches, numBlocks]);
+    setRandomizedPlates(randomizeSearches(searches, selectedCovariates));
+  }, [selectedCovariates, searches]);
 
-  useEffect(() => {
-    generateCovariateColors();
-  }, [primaryCovariate, searches]);
-
-  const generateCovariateColors = () => {
-    if (primaryCovariate && searches.length > 0) {
-      const covariateValues = new Set(searches.map((search) => search.metadata[primaryCovariate]));
+  const generateCovariateColors = useCallback(() => {
+    if (selectedCovariates.length > 0 && searches.length > 0) {
+      const covariateValues = new Set(
+        selectedCovariates.flatMap((covariate) =>
+          searches.map((search) => search.metadata[covariate])
+        )
+      );
       const colors = ['#FFE4E1', '#E0FFFF', '#F0FFF0', '#FFF0F5', '#F5F5DC', '#F0E68C', '#E6E6FA', '#FFE4B5'];
 
       const covariateColorsMap: { [key: string]: string } = {};
       let colorIndex = 0;
 
       covariateValues.forEach((value) => {
-        covariateColorsMap[value] = colors[colorIndex];
-        colorIndex = (colorIndex + 1) % colors.length;
+        covariateColorsMap[value] = colors[colorIndex % colors.length];
+        colorIndex += 1;
       });
 
       setCovariateColors(covariateColorsMap);
     }
-  };
+  }, [selectedCovariates, searches]); // Dependencies for useCallback
 
-  const randomizeSearches = () => {
-    if (primaryCovariate) {
-      const covariateValues = new Set(searches.map((search) => search.metadata[primaryCovariate]));
-      const numCovariateValues = covariateValues.size;
-      const numSearchesPerBlock = Math.floor(searches.length / numBlocks);
-      const remainingSearches = searches.length % numBlocks;
+  useEffect(() => {
+    generateCovariateColors();
+  }, [generateCovariateColors]); // generateCovariateColors is now a dependency
 
-      const randomized: SearchData[][] = Array.from({ length: numBlocks }, () => []);
-      const remainingSearchesByCovariate: { [key: string]: SearchData[] } = {};
 
-      covariateValues.forEach((value) => {
-        remainingSearchesByCovariate[value] = searches.filter(
-          (search) => search.metadata[primaryCovariate] === value
-        );
-      });
-
-      // Distribute the searches evenly among the blocks based on covariate values
-      for (let i = 0; i < numSearchesPerBlock; i++) {
-        covariateValues.forEach((value) => {
-          for (let j = 0; j < numBlocks; j++) {
-            if (remainingSearchesByCovariate[value].length > 0) {
-              const randomIndex = Math.floor(Math.random() * remainingSearchesByCovariate[value].length);
-              const search = remainingSearchesByCovariate[value].splice(randomIndex, 1)[0];
-              randomized[j].push(search);
+  function maximizeDissimilarity(plates: (SearchData | undefined)[][][], selectedCovariates: string[]): void {
+    plates.forEach((plate: (SearchData | undefined)[][]) => {
+      let orderedRows: (SearchData | undefined)[][] = [];
+  
+      const startIndex = Math.floor(Math.random() * plate.length);
+      orderedRows.push(...plate.splice(startIndex, 1));
+  
+      while (plate.length > 0) {
+        let bestScore = -Infinity;
+        let bestRow: (SearchData | undefined)[] | null = null;
+        let bestRowIndex = -1;
+  
+        plate.forEach((row: (SearchData | undefined)[], rowIndex: number) => {
+          const permutations = generatePermutations(row.filter(item => item !== undefined) as SearchData[]);
+          permutations.forEach(permutation => {
+            const score = calculateDissimilarityScore(permutation, orderedRows, selectedCovariates);
+            if (score > bestScore) {
+              bestScore = score;
+              bestRow = permutation;
+              bestRowIndex = rowIndex;
             }
-          }
+          });
         });
-      }
-
-      // Distribute the remaining searches randomly
-      for (let i = 0; i < remainingSearches; i++) {
-        const randomBlockIndex = Math.floor(Math.random() * numBlocks);
-        const randomCovariateValue = Array.from(covariateValues)[Math.floor(Math.random() * numCovariateValues)];
-        if (remainingSearchesByCovariate[randomCovariateValue].length > 0) {
-          const randomIndex = Math.floor(Math.random() * remainingSearchesByCovariate[randomCovariateValue].length);
-          const search = remainingSearchesByCovariate[randomCovariateValue].splice(randomIndex, 1)[0];
-          randomized[randomBlockIndex].push(search);
+  
+        if (bestRow !== null) {
+          orderedRows.push(bestRow);
+          plate.splice(bestRowIndex, 1);
         }
       }
-
-      return randomized;
+  
+      plate.push(...orderedRows.map(row => [...row, ...Array(12 - row.length).fill(undefined)]));
+    });
+  }
+  
+  function generatePermutations(array: SearchData[]): (SearchData | undefined)[][] {
+    if (array.length <= 1) return [array];
+    const perms: (SearchData | undefined)[][] = [];
+    const [first, ...rest] = array;
+    for (const perm of generatePermutations(rest)) {
+      for (let i = 0; i <= perm.length; i++) {
+        const start = perm.slice(0, i);
+        const end = perm.slice(i);
+        perms.push([...start, first, ...end]);
+      }
     }
-    return [];
-  };
+    return perms;
+  }
+  
+  function calculateDissimilarityScore(row: (SearchData | undefined)[], orderedRows: (SearchData | undefined)[][], selectedCovariates: string[]): number {
+    let score = 0;
+    for (let i = 0; i < row.length; i++) {
+      orderedRows.forEach((orderedRow: (SearchData | undefined)[]) => {
+        if (i < orderedRow.length && row[i] && orderedRow[i]) {
+          const dissimilarity = selectedCovariates.some(covariate => 
+            row[i]!.metadata[covariate] !== orderedRow[i]!.metadata[covariate]);
+          if (dissimilarity) score++;
+        }
+      });
+    }
+    return score;
+  }
+
+  function randomizeSearches(searches: SearchData[], selectedCovariates: string[]): (SearchData | undefined)[][][] {
+    const platesNeeded = Math.ceil(searches.length / 96);
+    let plates = Array.from({ length: platesNeeded }, () =>
+        Array.from({ length: 8 }, () => new Array(12).fill(undefined))
+    );
+
+    let shuffledSearches = shuffleArray([...searches]);
+
+    // Shuffle an array in-place and return it
+    function shuffleArray<T>(array: T[]): T[] {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+    }
+
+    function searchCanBePlaced(search: SearchData, row: (SearchData | undefined)[], tolerance: number): boolean {
+        const searchCovariates = selectedCovariates.map(cov => search.metadata[cov]);
+        let duplicateCount = 0;
+
+        for (const existingSearch of row) {
+            if (existingSearch === undefined) continue;
+            const existingSearchCovariates = selectedCovariates.map(cov => existingSearch.metadata[cov]);
+            if (JSON.stringify(searchCovariates) === JSON.stringify(existingSearchCovariates)) {
+                duplicateCount++;
+            }
+        }
+
+        return duplicateCount <= tolerance;
+    }
+
+    // Place searches with increasing tolerance
+    for (const search of shuffledSearches) {
+        let placed = false;
+        let tolerance = 0;
+
+        while (!placed) {
+            for (let p = 0; p < plates.length && !placed; p++) {
+                for (let r = 0; r < plates[p].length && !placed; r++) {
+                    if (searchCanBePlaced(search, plates[p][r], tolerance) && plates[p][r].includes(undefined)) {
+                        const indexToPlace = plates[p][r].indexOf(undefined);
+                        plates[p][r][indexToPlace] = search;
+                        placed = true;
+                    }
+                }
+            }
+
+            if (!placed) tolerance++;
+        }
+    }
+
+    //maximizeDissimilarity(plates, selectedCovariates);
+
+    // Shuffle the order of searches within each row after all searches have been assigned
+    for (let p = 0; p < plates.length; p++) {
+        for (let r = 0; r < plates[p].length; r++) {
+            plates[p][r] = shuffleArray(plates[p][r]);
+        }
+    }
+
+    return plates;
+}
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>, searchName: string) => {
     setDraggedSearch(searchName);
@@ -117,37 +199,51 @@ const App: React.FC = () => {
     event.preventDefault();
   };
 
-  const handleDrop = (event: DragEvent<HTMLDivElement>, blockIndex: number) => {
+  const handleDrop = (event: DragEvent<HTMLDivElement>, plateIndex: number, rowIndex: number, columnIndex: number) => {
     event.preventDefault();
     if (draggedSearch) {
-      const updatedRandomizedBlocks = [...randomizedBlocks];
+      const updatedRandomizedPlates = [...randomizedPlates];
+      const draggedSearchData = searches.find((search) => search.name === draggedSearch);
+      const targetSearchData = updatedRandomizedPlates[plateIndex][rowIndex][columnIndex];
 
-      // Find the search in the randomized blocks
-      let movedSearch: SearchData | null = null;
-      updatedRandomizedBlocks.forEach((block) => {
-        const searchIndex = block.findIndex((search) => search.name === draggedSearch);
-        if (searchIndex !== -1) {
-          movedSearch = block.splice(searchIndex, 1)[0];
+      if (draggedSearchData) {
+        // Find the current position of the dragged search
+        let draggedSearchPlateIndex = -1;
+        let draggedSearchRowIndex = -1;
+        let draggedSearchColumnIndex = -1;
+
+        updatedRandomizedPlates.forEach((plate, pIndex) => {
+          plate.forEach((row, rIndex) => {
+            const index = row.findIndex((s) => s?.name === draggedSearch);
+            if (index !== -1) {
+              draggedSearchPlateIndex = pIndex;
+              draggedSearchRowIndex = rIndex;
+              draggedSearchColumnIndex = index;
+            }
+          });
+        });
+
+        // Swap the positions of the dragged search and the target search
+        if (targetSearchData) {
+          updatedRandomizedPlates[draggedSearchPlateIndex][draggedSearchRowIndex][draggedSearchColumnIndex] = targetSearchData;
+        } else {
+          updatedRandomizedPlates[draggedSearchPlateIndex][draggedSearchRowIndex][draggedSearchColumnIndex] = undefined;
         }
-      });
 
-      if (movedSearch) {
-        // Add the search to the new block
-        updatedRandomizedBlocks[blockIndex].push(movedSearch);
-        setRandomizedBlocks(updatedRandomizedBlocks);
+        updatedRandomizedPlates[plateIndex][rowIndex][columnIndex] = draggedSearchData;
+        setRandomizedPlates(updatedRandomizedPlates);
       }
     }
   };
 
   const downloadCSV = () => {
     const csv = Papa.unparse(
-      searches.map((search, index) => ({
+      searches.map((search) => ({
         'search name': search.name,
-        age: search.metadata.age,
-        sex: search.metadata.sex,
-        treatment: search.metadata.treatment,
-        batch: search.metadata.batch,
-        Block: `Block ${getBlockNumber(search.name) + 1}`,
+        ...search.metadata,
+        plate: getPlateNumber(search.name),
+        row: getRowName(search.name),
+        column: getColumnNumber(search.name),
       })),
       { header: true }
     );
@@ -163,71 +259,109 @@ const App: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  const getBlockNumber = (searchName: string) => {
-    for (let i = 0; i < randomizedBlocks.length; i++) {
-      const block = randomizedBlocks[i];
-      if (block.find((search) => search.name === searchName)) {
-        return i;
+  const getPlateNumber = (searchName: string) => {
+    for (let plateIndex = 0; plateIndex < randomizedPlates.length; plateIndex++) {
+      const plate = randomizedPlates[plateIndex];
+      for (let rowIndex = 0; rowIndex < plate.length; rowIndex++) {
+        const row = plate[rowIndex];
+        if (row.find((search) => search?.name === searchName)) {
+          return plateIndex + 1;
+        }
       }
     }
-    return -1;
+    return '';
+  };
+
+  const getRowName = (searchName: string) => {
+    for (let plateIndex = 0; plateIndex < randomizedPlates.length; plateIndex++) {
+      const plate = randomizedPlates[plateIndex];
+      for (let rowIndex = 0; rowIndex < plate.length; rowIndex++) {
+        const row = plate[rowIndex];
+        if (row.find((search) => search?.name === searchName)) {
+          return String.fromCharCode(65 + rowIndex);
+        }
+      }
+    }
+    return '';
+  };
+
+  const getColumnNumber = (searchName: string) => {
+    for (let plateIndex = 0; plateIndex < randomizedPlates.length; plateIndex++) {
+      const plate = randomizedPlates[plateIndex];
+      for (let rowIndex = 0; rowIndex < plate.length; rowIndex++) {
+        const row = plate[rowIndex];
+        for (let columnIndex = 0; columnIndex < row.length; columnIndex++) {
+          if (row[columnIndex]?.name === searchName) {
+            return (columnIndex + 1).toString().padStart(2, '0');
+          }
+        }
+      }
+    }
+    return '';
   };
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.heading}>Batch Randomization</h1>
-      <input type="file" accept=".csv" onChange={handleFileUpload} style={styles.fileInput} />
-      <div style={styles.blockSelection}>
-        <label htmlFor="numBlocks">Number of Blocks:</label>
-        <select id="numBlocks" value={numBlocks} onChange={handleNumBlocksChange}>
-          {[...Array(10)].map((_, i) => (
-            <option key={i + 1} value={i + 1}>
-              {i + 1}
-            </option>
+      <div style={styles.content}>
+        <h1 style={styles.heading}>Block Randomization</h1>
+        <input type="file" accept=".csv" onChange={handleFileUpload} style={styles.fileInput} />
+        <div style={styles.covariateSelection}>
+          <label htmlFor="covariates">Select Covariates:</label>
+          <select id="covariates" multiple value={selectedCovariates} onChange={handleCovariateChange}>
+            {searches.length > 0 &&
+              Object.keys(searches[0].metadata).map((covariate) => (
+                <option key={covariate} value={covariate}>
+                  {covariate}
+                </option>
+              ))}
+          </select>
+        </div>
+        <div style={styles.platesContainer}>
+          {randomizedPlates.map((plate, plateIndex) => (
+            <div key={plateIndex} style={styles.plateWrapper}>
+              <Plate
+                plateIndex={plateIndex}
+                rows={plate}
+                covariateColors={covariateColors}
+                selectedCovariates={selectedCovariates}
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDrop={(event, rowIndex, columnIndex) => handleDrop(event, plateIndex, rowIndex, columnIndex)}
+              />
+            </div>
           ))}
-        </select>
+        </div>
+        {selectedCovariates.length > 0 && randomizedPlates.length > 0 && (
+          <button onClick={downloadCSV} style={styles.downloadButton}>
+            Download CSV
+          </button>
+        )}
       </div>
-      <div style={styles.covariateSelection}>
-        <label htmlFor="primaryCovariate">Primary Covariate:</label>
-        <select id="primaryCovariate" value={primaryCovariate} onChange={handlePrimaryCovariateChange}>
-          <option value="">Select a covariate</option>
-          {searches.length > 0 &&
-            Object.keys(searches[0].metadata).map((covariate) => (
-              <option key={covariate} value={covariate}>
-                {covariate}
-              </option>
-            ))}
-        </select>
-      </div>
-      <div style={styles.blocksContainer}>
-        {randomizedBlocks.map((block, blockIndex) => (
-          <Block
-            key={blockIndex}
-            blockIndex={blockIndex}
-            searches={block}
-            covariateColors={covariateColors}
-            primaryCovariate={primaryCovariate}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-          />
-        ))}
-      </div>
-      {primaryCovariate && numBlocks > 1 && (
-        <button onClick={downloadCSV} style={styles.downloadButton}>
-          Download CSV
-        </button>
-      )}
     </div>
   );
 };
 
 const styles = {
   container: {
-    width: '80%',
-    maxWidth: '1600px',
-    margin: '0 auto',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: '100vh',
+    backgroundColor: '#f0f0f0',
     padding: '20px',
+    boxSizing: 'border-box' as const,
+  },
+  content: {
+    width: '100%',
+    maxWidth: '1600px',
+    backgroundColor: '#fff',
+    borderRadius: '8px',
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+    padding: '20px',
+    boxSizing: 'border-box' as const,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
   },
   heading: {
     fontSize: '24px',
@@ -237,23 +371,25 @@ const styles = {
   fileInput: {
     marginBottom: '20px',
   },
-  blockSelection: {
-    marginBottom: '20px',
-  },
   covariateSelection: {
     marginBottom: '20px',
   },
-  blocksContainer: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))',
+  platesContainer: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    justifyContent: 'center',
     gap: '20px',
+    width: '100%',
+  },
+  plateWrapper: {
+    margin: '10px',
   },
   downloadButton: {
     marginTop: '20px',
     padding: '10px 20px',
     fontSize: '16px',
     backgroundColor: '#4caf50',
-    color: 'white',
+    color: '#fff',
     border: 'none',
     borderRadius: '4px',
     cursor: 'pointer',
