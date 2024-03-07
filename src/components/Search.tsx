@@ -17,11 +17,9 @@ const Search: React.FC<SearchProps> = ({ name, metadata, backgroundColor, onDrag
     <div style={{ ...styles.card, backgroundColor }} draggable onDragStart={handleDragStart}>
       <h3 style={styles.title}>{name}</h3>
       <hr style={styles.divider} />
-      <ul style={styles.metadata}>
       {selectedCovariates.map((covariate: string) => 
         metadata[covariate] ? <div key={covariate} style={styles.metadata}>{`${covariate}: ${metadata[covariate]}`}</div> : null
       )}
-      </ul>
     </div>
   );
 };
@@ -35,7 +33,7 @@ const styles = {
     width: '150px',
   },
   title: {
-    fontSize: '16px',
+    fontSize: '14px',
     fontWeight: 'bold',
     marginBottom: '8px',
     color: '#333',
