@@ -2,6 +2,7 @@ import React, { useState, useEffect, DragEvent, useCallback  } from 'react';
 import Papa from 'papaparse';
 import Plate from './components/Plate';
 import { SearchData } from './types';
+import { randomizeSearches, downloadCSV } from './utils';
 
 const App: React.FC = () => {
   const [searches, setSearches] = useState<SearchData[]>([]);
@@ -28,6 +29,10 @@ const App: React.FC = () => {
         },
       });
     }
+  };
+
+  const handleDownloadCSV = () => {
+    downloadCSV(searches, randomizedPlates);
   };
 
   const handleCovariateChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -63,133 +68,6 @@ const App: React.FC = () => {
   useEffect(() => {
     generateCovariateColors();
   }, [generateCovariateColors]); // generateCovariateColors is now a dependency
-
-
-  function maximizeDissimilarity(plates: (SearchData | undefined)[][][], selectedCovariates: string[]): void {
-    plates.forEach((plate: (SearchData | undefined)[][]) => {
-      let orderedRows: (SearchData | undefined)[][] = [];
-  
-      const startIndex = Math.floor(Math.random() * plate.length);
-      orderedRows.push(...plate.splice(startIndex, 1));
-  
-      while (plate.length > 0) {
-        let bestScore = -Infinity;
-        let bestRow: (SearchData | undefined)[] | null = null;
-        let bestRowIndex = -1;
-  
-        plate.forEach((row: (SearchData | undefined)[], rowIndex: number) => {
-          const permutations = generatePermutations(row.filter(item => item !== undefined) as SearchData[]);
-          permutations.forEach(permutation => {
-            const score = calculateDissimilarityScore(permutation, orderedRows, selectedCovariates);
-            if (score > bestScore) {
-              bestScore = score;
-              bestRow = permutation;
-              bestRowIndex = rowIndex;
-            }
-          });
-        });
-  
-        if (bestRow !== null) {
-          orderedRows.push(bestRow);
-          plate.splice(bestRowIndex, 1);
-        }
-      }
-  
-      plate.push(...orderedRows.map(row => [...row, ...Array(12 - row.length).fill(undefined)]));
-    });
-  }
-  
-  function generatePermutations(array: SearchData[]): (SearchData | undefined)[][] {
-    if (array.length <= 1) return [array];
-    const perms: (SearchData | undefined)[][] = [];
-    const [first, ...rest] = array;
-    for (const perm of generatePermutations(rest)) {
-      for (let i = 0; i <= perm.length; i++) {
-        const start = perm.slice(0, i);
-        const end = perm.slice(i);
-        perms.push([...start, first, ...end]);
-      }
-    }
-    return perms;
-  }
-  
-  function calculateDissimilarityScore(row: (SearchData | undefined)[], orderedRows: (SearchData | undefined)[][], selectedCovariates: string[]): number {
-    let score = 0;
-    for (let i = 0; i < row.length; i++) {
-      orderedRows.forEach((orderedRow: (SearchData | undefined)[]) => {
-        if (i < orderedRow.length && row[i] && orderedRow[i]) {
-          const dissimilarity = selectedCovariates.some(covariate => 
-            row[i]!.metadata[covariate] !== orderedRow[i]!.metadata[covariate]);
-          if (dissimilarity) score++;
-        }
-      });
-    }
-    return score;
-  }
-
-  function randomizeSearches(searches: SearchData[], selectedCovariates: string[]): (SearchData | undefined)[][][] {
-    const platesNeeded = Math.ceil(searches.length / 96);
-    let plates = Array.from({ length: platesNeeded }, () =>
-        Array.from({ length: 8 }, () => new Array(12).fill(undefined))
-    );
-
-    let shuffledSearches = shuffleArray([...searches]);
-
-    // Shuffle an array in-place and return it
-    function shuffleArray<T>(array: T[]): T[] {
-        for (let i = array.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [array[i], array[j]] = [array[j], array[i]];
-        }
-        return array;
-    }
-
-    function searchCanBePlaced(search: SearchData, row: (SearchData | undefined)[], tolerance: number): boolean {
-        const searchCovariates = selectedCovariates.map(cov => search.metadata[cov]);
-        let duplicateCount = 0;
-
-        for (const existingSearch of row) {
-            if (existingSearch === undefined) continue;
-            const existingSearchCovariates = selectedCovariates.map(cov => existingSearch.metadata[cov]);
-            if (JSON.stringify(searchCovariates) === JSON.stringify(existingSearchCovariates)) {
-                duplicateCount++;
-            }
-        }
-
-        return duplicateCount <= tolerance;
-    }
-
-    // Place searches with increasing tolerance
-    for (const search of shuffledSearches) {
-        let placed = false;
-        let tolerance = 0;
-
-        while (!placed) {
-            for (let p = 0; p < plates.length && !placed; p++) {
-                for (let r = 0; r < plates[p].length && !placed; r++) {
-                    if (searchCanBePlaced(search, plates[p][r], tolerance) && plates[p][r].includes(undefined)) {
-                        const indexToPlace = plates[p][r].indexOf(undefined);
-                        plates[p][r][indexToPlace] = search;
-                        placed = true;
-                    }
-                }
-            }
-
-            if (!placed) tolerance++;
-        }
-    }
-
-    //maximizeDissimilarity(plates, selectedCovariates);
-
-    // Shuffle the order of searches within each row after all searches have been assigned
-    for (let p = 0; p < plates.length; p++) {
-        for (let r = 0; r < plates[p].length; r++) {
-            plates[p][r] = shuffleArray(plates[p][r]);
-        }
-    }
-
-    return plates;
-}
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>, searchName: string) => {
     setDraggedSearch(searchName);
@@ -236,70 +114,6 @@ const App: React.FC = () => {
     }
   };
 
-  const downloadCSV = () => {
-    const csv = Papa.unparse(
-      searches.map((search) => ({
-        'search name': search.name,
-        ...search.metadata,
-        plate: getPlateNumber(search.name),
-        row: getRowName(search.name),
-        column: getColumnNumber(search.name),
-      })),
-      { header: true }
-    );
-
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'randomized_searches.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const getPlateNumber = (searchName: string) => {
-    for (let plateIndex = 0; plateIndex < randomizedPlates.length; plateIndex++) {
-      const plate = randomizedPlates[plateIndex];
-      for (let rowIndex = 0; rowIndex < plate.length; rowIndex++) {
-        const row = plate[rowIndex];
-        if (row.find((search) => search?.name === searchName)) {
-          return plateIndex + 1;
-        }
-      }
-    }
-    return '';
-  };
-
-  const getRowName = (searchName: string) => {
-    for (let plateIndex = 0; plateIndex < randomizedPlates.length; plateIndex++) {
-      const plate = randomizedPlates[plateIndex];
-      for (let rowIndex = 0; rowIndex < plate.length; rowIndex++) {
-        const row = plate[rowIndex];
-        if (row.find((search) => search?.name === searchName)) {
-          return String.fromCharCode(65 + rowIndex);
-        }
-      }
-    }
-    return '';
-  };
-
-  const getColumnNumber = (searchName: string) => {
-    for (let plateIndex = 0; plateIndex < randomizedPlates.length; plateIndex++) {
-      const plate = randomizedPlates[plateIndex];
-      for (let rowIndex = 0; rowIndex < plate.length; rowIndex++) {
-        const row = plate[rowIndex];
-        for (let columnIndex = 0; columnIndex < row.length; columnIndex++) {
-          if (row[columnIndex]?.name === searchName) {
-            return (columnIndex + 1).toString().padStart(2, '0');
-          }
-        }
-      }
-    }
-    return '';
-  };
-
   return (
     <div style={styles.container}>
       <div style={styles.content}>
@@ -332,7 +146,7 @@ const App: React.FC = () => {
           ))}
         </div>
         {selectedCovariates.length > 0 && randomizedPlates.length > 0 && (
-          <button onClick={downloadCSV} style={styles.downloadButton}>
+          <button onClick={handleDownloadCSV} style={styles.downloadButton}>
             Download CSV
           </button>
         )}
